@@ -8,10 +8,12 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 class yoloLoss(nn.Module):
-    def __init__(self,S,B,l_coord,l_noobj):
+    def __init__(self,S,B,C,l_coord,l_noobj):
         super(yoloLoss,self).__init__()
         self.S = S
         self.B = B
+        self.C = C
+        self.out_channels = B * 5 + C
         self.l_coord = l_coord
         self.l_noobj = l_noobj
 
@@ -58,17 +60,17 @@ class yoloLoss(nn.Module):
         coo_mask = coo_mask.unsqueeze(-1).expand_as(target_tensor)
         noo_mask = noo_mask.unsqueeze(-1).expand_as(target_tensor)
 
-        coo_pred = pred_tensor[coo_mask].view(-1,30)
+        coo_pred = pred_tensor[coo_mask].view(-1,self.out_channels)
         box_pred = coo_pred[:,:10].contiguous().view(-1,5) #box[x1,y1,w1,h1,c1]
         class_pred = coo_pred[:,10:]                       #[x2,y2,w2,h2,c2]
         
-        coo_target = target_tensor[coo_mask].view(-1,30)
+        coo_target = target_tensor[coo_mask].view(-1,self.out_channels)
         box_target = coo_target[:,:10].contiguous().view(-1,5)
         class_target = coo_target[:,10:]
 
         # compute not contain obj loss
-        noo_pred = pred_tensor[noo_mask].view(-1,30)
-        noo_target = target_tensor[noo_mask].view(-1,30)
+        noo_pred = pred_tensor[noo_mask].view(-1,self.out_channels)
+        noo_target = target_tensor[noo_mask].view(-1,self.out_channels)
         noo_pred_mask = torch.cuda.BoolTensor(noo_pred.size())
         noo_pred_mask.zero_()
         noo_pred_mask[:,4]=1

@@ -37,13 +37,14 @@ class detnet_bottleneck(nn.Module):
 
 
 class YOLO(nn.Module):
-    def __init__(self, backbone, pretrained=True):
+    def __init__(self, backbone, pretrained=True, feat_channels=2048, S=7, B=2, C=20):
         super().__init__()
         if 'resnet' in backbone:
             self.backbone = getattr(resnet, backbone)(pretrained=pretrained)
-        self.layer5 = self._make_detnet_layer(in_channels=2048)
-        self.conv_end = nn.Conv2d(256, 30, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn_end = nn.BatchNorm2d(30)
+        self.layer5 = self._make_detnet_layer(in_channels=feat_channels)
+        end_channels = B * 5 + C
+        self.conv_end = nn.Conv2d(256, end_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn_end = nn.BatchNorm2d(end_channels)
 
     def forward(self, x):
         x = self.backbone(x)

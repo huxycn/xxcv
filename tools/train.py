@@ -10,9 +10,10 @@ from torch.autograd import Variable
 
 from yolo.yolo import YOLO
 from yolo.yoloLoss import yoloLoss
-from yolo.dataset import yoloDataset
+from yolo.data import COCODetectionDataset
 
 from yolo.utils.visualize import Visualizer
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from loguru import logger
 
@@ -23,11 +24,12 @@ learning_rate = 0.001
 num_epochs = 50
 batch_size = 12
 use_resnet = True
-net = YOLO('resnet50')
+net = YOLO('resnet18', feat_channels=512, S=7, B=2, C=2)
+# net = YOLO('resnet50', feat_channels=2048)
 
 logger.info(f'cuda: {torch.cuda.current_device()}, {torch.cuda.device_count()}')
 
-criterion = yoloLoss(7,2,5,0.5)
+criterion = yoloLoss(S=7, B=2, C=2, l_coord=5, l_noobj=0.5)
 if use_gpu:
     net.cuda()
 
@@ -43,18 +45,22 @@ for key,value in params_dict.items():
 optimizer = torch.optim.SGD(params, lr=learning_rate, momentum=0.9, weight_decay=5e-4)
 
 coco_root = '/mnt/disk/Data/PublicDatasets/COCO/'
-train_dataset = yoloDataset(osp.join(coco_root, 'train2017'), ann_file=osp.join(coco_root, 'annotations/mini_instances_train2017.json'), train=True, transform=[transforms.ToTensor()], img_size=(448, 448))
+train_dataset = COCODetectionDataset(osp.join(coco_root, 'train2017'), 
+                            ann_file=osp.join(coco_root, 'annotations/mini_instances_train2017.json'), 
+                            train=True, transform=[transforms.ToTensor()], 
+                            img_size=(448, 448))
     
-train_loader = DataLoader(train_dataset,batch_size=batch_size,shuffle=True,num_workers=4)
+train_loader = DataLoader(train_dataset,batch_size=batch_size,shuffle=True,num_workers=1)
 
-test_dataset = yoloDataset(osp.join(coco_root, 'val2017'), ann_file=osp.join(coco_root, 'annotations/mini_instances_val2017.json'), train=True, transform=[transforms.ToTensor()], img_size=(448, 448))
-test_loader = DataLoader(test_dataset,batch_size=batch_size,shuffle=False,num_workers=4)
+test_dataset = COCODetectionDataset(osp.join(coco_root, 'val2017'), ann_file=osp.join(coco_root, 'annotations/mini_instances_val2017.json'), train=True, transform=[transforms.ToTensor()], img_size=(448, 448))
+test_loader = DataLoader(test_dataset,batch_size=batch_size,shuffle=False,num_workers=1)
 logger.info(f'the dataset has {len(train_dataset)} images')
 logger.info(f'the batch_size is {batch_size}')
 logfile = open('log.txt', 'w')
 
 num_iter = 0
-vis = Visualizer(env='main')
+# vis = Visualizer(env='main')
+writer = SummaryWriter('tb_log')
 best_test_loss = np.inf
 
 for epoch in range(num_epochs):
@@ -87,7 +93,8 @@ for epoch in range(num_epochs):
         if (i+1) % 5 == 0:
             logger.info(f'Epoch [{epoch+1}/{num_epochs}], Iter [{i+1}/{len(train_loader)}] Loss: {loss.item():.4f}, average_loss: {total_loss / (i+1):.4f}')
             num_iter += 1
-            vis.plot_train_val(loss_train=total_loss/(i+1))
+            writer.add_scalar('Train/loss', total_loss/(i+1), global_step=epoch*len(train_loader)+i+1)
+            # vis.plot_train_val(loss_train=total_loss/(i+1))
 
     #validation
     validation_loss = 0.0
@@ -104,7 +111,8 @@ for epoch in range(num_epochs):
         logger.info(f'[{i}/{len(test_loader)}] val loss: {loss.item()}')
         validation_loss += loss.item()
     validation_loss /= len(test_loader)
-    vis.plot_train_val(loss_val=validation_loss)
+    # vis.plot_train_val(loss_val=validation_loss)
+    writer.add_scalar('Val/loss', validation_loss, global_step=epoch)
     
     if best_test_loss > validation_loss:
         best_test_loss = validation_loss
