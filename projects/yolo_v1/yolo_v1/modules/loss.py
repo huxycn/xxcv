@@ -7,9 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
-class yoloLoss(nn.Module):
+class YOLOLoss(nn.Module):
     def __init__(self,S,B,C,l_coord,l_noobj):
-        super(yoloLoss,self).__init__()
+        super().__init__()
         self.S = S
         self.B = B
         self.C = C

@@ -1,45 +1,20 @@
-#encoding:utf-8
-#
-#created by xiongzihua
-#
-import torch
-from torch.autograd import Variable
-import torch.nn as nn
-
-# from net import vgg16, vgg16_bn
-# from resnet_yolo import resnet50
-import torchvision.transforms as transforms
 import cv2
-import numpy as np
+import torch
+import argparse
 
-VOC_CLASSES = (    # always index 0
-    'aeroplane', 'bicycle', 'bird', 'boat',
-    'bottle', 'bus', 'car', 'cat', 'chair',
-    'cow', 'diningtable', 'dog', 'horse',
-    'motorbike', 'person', 'pottedplant',
-'sheep', 'sofa', 'train', 'tvmonitor')
+import albumentations as A
 
-Color = [[0, 0, 0],
-                    [128, 0, 0],
-                    [0, 128, 0],
-                    [128, 128, 0],
-                    [0, 0, 128],
-                    [128, 0, 128],
-                    [0, 128, 128],
-                    [128, 128, 128],
-                    [64, 0, 0],
-                    [192, 0, 0],
-                    [64, 128, 0],
-                    [192, 128, 0],
-                    [64, 0, 128],
-                    [192, 0, 128],
-                    [64, 128, 128],
-                    [192, 128, 128],
-                    [0, 64, 0],
-                    [128, 64, 0],
-                    [0, 192, 0],
-                    [128, 192, 0],
-                    [0, 64, 128]]
+from albumentations import pytorch
+
+from detectron2.config import LazyConfig, instantiate
+
+
+CLASSES = ('cat', 'dog')
+COLOR = [
+    [0, 0, 0],
+    [128, 0, 0],
+    [0, 128, 0]
+]
 
 def decoder(pred):
     '''
@@ -128,25 +103,21 @@ def nms(bboxes,scores,threshold=0.5):
 #
 #start predict one image
 #
-def predict_gpu(model,image_name,root_path=''):
+def predict_gpu(model,image_name, transform, root_path=''):
 
     result = []
-    image = cv2.imread(root_path+image_name)
-    h,w,_ = image.shape
-    img = cv2.resize(image,(448,448))
-    img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-    mean = (123,117,104)#RGB
-    img = img - np.array(mean,dtype=np.float32)
+    img = cv2.imread(root_path+image_name)
+    h, w, _ = img.shape
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    transform = transforms.Compose([transforms.ToTensor(),])
-    img = transform(img)
+    transformed = transform(image=img)
+    img = transformed['image']
     img = torch.unsqueeze(img, dim=0)
-    
-    # img = Variable(img[None,:,:,:],volatile=True)
+
     img = img.cuda()
 
     with torch.no_grad():
-        pred = model(img) #1x7x7x30
+        pred = model((img, None)) #1x7x7x30
     pred = pred.cpu()
     boxes,cls_indexs,probs =  decoder(pred)
 
@@ -159,23 +130,29 @@ def predict_gpu(model,image_name,root_path=''):
         cls_index = int(cls_index) # convert LongTensor to int
         prob = probs[i]
         prob = float(prob)
-        result.append([(x1,y1),(x2,y2),VOC_CLASSES[cls_index],image_name,prob])
+        result.append([(x1,y1),(x2,y2),CLASSES[cls_index],image_name,prob])
     return result
         
 
-if __name__ == '__main__':
-    from yolo.yolo import YOLO
-    model = YOLO('resnet50')
-    print('load model...')
-    model.load_state_dict(torch.load('best.pth'))
+def main(args):
+    cfg = LazyConfig.load(args.config_file)
+    cfg = LazyConfig.apply_overrides(cfg, args.opts)
+
+    model = instantiate(cfg.model)
+    model.to(cfg.train.device)
     model.eval()
-    model.cuda()
-    image_name = 'demo/dog.jpg'
-    image = cv2.imread(image_name)
-    print('predicting...')
-    result = predict_gpu(model,image_name)
+
+    model.load_state_dict(torch.load('/mnt/disk/Code/yolo/pytorch-YOLO-v1/projects/yolo_v1/output/model_final.pth')['model'])
+
+    transform_cfg = cfg.dataloader.test.dataset.transform
+    transform_cfg.bbox_params = None
+    transform = instantiate(transform_cfg)
+
+    image = cv2.imread(args.image_file)
+    # print('predicting...')
+    result = predict_gpu(model, args.image_file, transform)
     for left_up,right_bottom,class_name,_,prob in result:
-        color = Color[VOC_CLASSES.index(class_name)]
+        color = COLOR[CLASSES.index(class_name)]
         cv2.rectangle(image,left_up,right_bottom,color,2)
         label = class_name+str(round(prob,2))
         text_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
@@ -185,3 +162,24 @@ if __name__ == '__main__':
 
     cv2.imwrite('result.jpg',image)
 
+
+def argument_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
+    parser.add_argument("--image-file", default="", metavar="FILE", help="path to image file")
+    parser.add_argument(
+        "opts",
+        help="""
+Modify config options at the end of the command. For Yacs configs, use
+space-separated "PATH.KEY VALUE" pairs.
+For python-based LazyConfig, use "path.key=value".
+        """.strip(),
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
+    return parser
+
+
+if __name__ == '__main__':
+    args = argument_parser().parse_args()
+    main(args)

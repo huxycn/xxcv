@@ -1,8 +1,7 @@
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-
-from yolo.backbone import resnet
 
 
 class detnet_bottleneck(nn.Module):
@@ -37,23 +36,34 @@ class detnet_bottleneck(nn.Module):
 
 
 class YOLO(nn.Module):
-    def __init__(self, backbone, pretrained=True, feat_channels=2048, S=7, B=2, C=20):
+    def __init__(self, backbone, pretrained=True, feat_channels=2048, S=7, B=2, C=20, criterion=None):
         super().__init__()
-        if 'resnet' in backbone:
-            self.backbone = getattr(resnet, backbone)(pretrained=pretrained)
+        self.backbone = backbone
         self.layer5 = self._make_detnet_layer(in_channels=feat_channels)
         end_channels = B * 5 + C
         self.conv_end = nn.Conv2d(256, end_channels, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn_end = nn.BatchNorm2d(end_channels)
+        self.criterion = criterion
 
-    def forward(self, x):
+    @property
+    def device(self):
+        return list(self.parameters())[0].device
+
+    def forward(self, inputs):
+        x, y = inputs
+        x = x.to(self.device)
+        
         x = self.backbone(x)
         x = self.layer5(x)
         x = self.conv_end(x)
         x = self.bn_end(x)
         x = torch.sigmoid(x)
         x = x.permute(0,2,3,1) #(-1,7,7,30)
-        return x
+        if self.training:
+            y = y.to(self.device)
+            return self.criterion(x, y)
+        else:
+            return x
 
     def _make_detnet_layer(self,in_channels):
         layers = []
